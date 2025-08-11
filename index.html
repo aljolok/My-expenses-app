@@ -6,6 +6,7 @@
     <title>Expense Wallet</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#000000">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
     <style>
         :root {
             --box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
@@ -220,23 +221,112 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        
-        @keyframes flash {
-            0% { background-color: #fff3cd; }
-            100% { background-color: var(--light-primary); }
-        }
 
-        body.dark @keyframes flash-dark {
-            0% { background-color: #6c757d; }
-            100% { background-color: var(--dark-primary); }
+        @keyframes slide-in {
+            0% {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            100% {
+                transform: translateX(0);
+                opacity: 1;
+            }
         }
 
         .list li.new {
-            animation: flash 1s ease-out;
+            animation: slide-in 0.5s ease-out;
+        }
+        
+        body.focus-mode-active main > section:not(.add-transaction) {
+            opacity: 0.5;
+            pointer-events: none;
+            transition: opacity 0.3s ease-in-out;
         }
 
-        body.dark .list li.new {
-            animation: flash-dark 1s ease-out;
+        body.focus-mode-active main > section.add-transaction {
+            transform: scale(1.02);
+            transition: transform 0.3s ease-in-out;
+        }
+
+        .mini-widget {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 150px;
+            background-color: var(--light-primary);
+            box-shadow: var(--box-shadow);
+            border-radius: 5px;
+            z-index: 1000;
+            cursor: move;
+        }
+        body.dark .mini-widget {
+            background-color: var(--dark-primary);
+        }
+        .widget-header {
+            padding: 5px;
+            background-color: #9c88ff;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .widget-header button {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 1.2rem;
+        }
+        .widget-content {
+            padding: 10px;
+            text-align: center;
+        }
+        #widget-balance {
+            margin: 0;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+        .form-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .color-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .kpi-badges {
+            margin-top: 20px;
+        }
+        .kpi-badge {
+            background-color: #eaf2f8;
+            color: #34495e;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            font-size: 0.9em;
+        }
+        body.dark .kpi-badge {
+            background-color: #4a5568;
+            color: #e2e8f0;
+        }
+
+        .dashboard {
+            margin-bottom: 20px;
+        }
+        .chart-container {
+            background: var(--light-primary);
+            padding: 1rem;
+            border-radius: 5px;
+            box-shadow: var(--box-shadow);
+            margin-bottom: 20px;
+        }
+        body.dark .chart-container {
+            background: var(--dark-primary);
         }
     </style>
 </head>
@@ -250,6 +340,21 @@
             </header>
         
             <main>
+                <section class="dashboard">
+                    <h2>Dashboard</h2>
+                    <div class="chart-container">
+                        <canvas id="category-chart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="timeline-chart"></canvas>
+                    </div>
+                </section>
+                <section class="kpi-badges">
+                    <h2>Insights</h2>
+                    <div id="kpi-container">
+                        <!-- Badges will be generated here -->
+                    </div>
+                </section>
                 <section class="balance">
                     <div>
                         <h2>Balance</h2>
@@ -270,10 +375,27 @@
                 <section class="transactions">
                     <h2>History</h2>
                     <div class="filter-container">
+                        <label for="search-text">Search:</label>
+                        <input type="text" id="search-text" placeholder="Search transactions...">
+
                         <label for="filter-category">Filter by category:</label>
                         <select id="filter-category">
                             <option value="all">All</option>
                         </select>
+
+                        <label for="start-date">Start Date:</label>
+                        <input type="date" id="start-date">
+
+                        <label for="end-date">End Date:</label>
+                        <input type="date" id="end-date">
+
+                        <label for="amount-filter-type">Amount:</label>
+                        <select id="amount-filter-type">
+                            <option value="any">Any</option>
+                            <option value="greater">Greater than</option>
+                            <option value="less">Less than</option>
+                        </select>
+                        <input type="number" id="amount-filter-value" placeholder="Enter amount...">
                     </div>
                     <ul id="transaction-list" class="list"></ul>
                 </section>
@@ -302,7 +424,10 @@
                             <label for="category">Category</label>
                             <input type="text" id="category" placeholder="Enter category..." />
                         </div>
-                        <button class="btn">Add transaction</button>
+                        <div class="form-buttons">
+                            <button class="btn">Add transaction</button>
+                            <button type="button" id="voice-btn" class="btn">🎤</button>
+                        </div>
                     </form>
                 </section>
         
@@ -316,6 +441,15 @@
             </main>
         </div>
     </div>
+    <div id="mini-widget" class="mini-widget">
+        <div class="widget-header">
+            <span>Balance</span>
+            <button id="minimize-widget">-</button>
+        </div>
+        <div class="widget-content">
+            <p id="widget-balance">$0.00</p>
+        </div>
+    </div>
     <script>
         const balance = document.getElementById('balance-amount');
         const money_plus = document.getElementById('income-amount');
@@ -327,6 +461,11 @@
         const category = document.getElementById('category');
         const themeToggle = document.getElementById('theme-toggle');
         const filterCategory = document.getElementById('filter-category');
+        const searchText = document.getElementById('search-text');
+        const startDate = document.getElementById('start-date');
+        const endDate = document.getElementById('end-date');
+        const amountFilterType = document.getElementById('amount-filter-type');
+        const amountFilterValue = document.getElementById('amount-filter-value');
         const exportBtn = document.getElementById('export-btn');
         const importBtn = document.getElementById('import-btn');
         const importFile = document.getElementById('import-file');
@@ -346,6 +485,18 @@
         const localStorageTransactions = localStorage.getItem('transactions');
         let transactions = localStorage.getItem('transactions') !== null ? decodeData(localStorageTransactions) : [];
 
+        const predefinedColors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#FF6384', '#36A2EB'];
+        let categoryColors = JSON.parse(localStorage.getItem('categoryColors')) || {};
+
+        function getCategoryColor(category) {
+            if (!categoryColors[category]) {
+                const colorIndex = Object.keys(categoryColors).length % predefinedColors.length;
+                categoryColors[category] = predefinedColors[colorIndex];
+                localStorage.setItem('categoryColors', JSON.stringify(categoryColors));
+            }
+            return categoryColors[category];
+        }
+
         function addTransaction(e) {
             e.preventDefault();
 
@@ -362,7 +513,8 @@
                 text: text.value,
                 amount: +transactionAmount,
                 category: category.value.trim() || 'Uncategorized',
-                type: transactionType
+                type: transactionType,
+                date: new Date().toISOString()
             };
 
             transactions.push(transaction);
@@ -381,15 +533,17 @@
         function addTransactionDOM(transaction, isNew = false) {
             const sign = transaction.amount < 0 ? '-' : '+';
             const item = document.createElement('li');
+            item.dataset.id = transaction.id;
             item.classList.add(transaction.amount < 0 ? 'minus' : 'plus');
             if (isNew) {
                 item.classList.add('new');
-                setTimeout(() => item.classList.remove('new'), 1000);
+                setTimeout(() => item.classList.remove('new'), 500);
             }
+            const categoryColor = getCategoryColor(transaction.category);
             item.innerHTML = `
                 <div>
                     <span>${transaction.text}</span>
-                    <small>${transaction.category}</small>
+                    <small><span class="color-dot" style="background-color: ${categoryColor}"></span>${transaction.category}</small>
                 </div>
                 <span>${sign}${Math.abs(transaction.amount).toFixed(2)}</span>
                 <button class="delete-btn" onclick="removeTransaction(${transaction.id})">x</button>
@@ -422,12 +576,25 @@
             balance.innerText = `$${total}`;
             money_plus.innerText = `+$${income}`;
             money_minus.innerText = `-$${expense}`;
+            document.getElementById('widget-balance').innerText = `$${total}`;
         }
 
         function removeTransaction(id) {
-            transactions = transactions.filter(transaction => transaction.id !== id);
-            updateLocalStorage();
-            init();
+            const transactionEl = document.querySelector(`li[data-id="${id}"]`);
+
+            if (transactionEl) {
+                transactionEl.classList.add('swiped-out'); // Reuse the swipe-out animation
+                setTimeout(() => {
+                    transactions = transactions.filter(transaction => transaction.id !== id);
+                    updateLocalStorage();
+                    init();
+                }, 500);
+            } else {
+                // Fallback for cases where the element is not found
+                transactions = transactions.filter(transaction => transaction.id !== id);
+                updateLocalStorage();
+                init();
+            }
         }
 
         function updateLocalStorage() {
@@ -453,13 +620,41 @@
         }
         
         function filterTransactions() {
+            const searchValue = searchText.value.toLowerCase();
             const selectedCategory = filterCategory.value;
+            const startDateValue = startDate.value;
+            const endDateValue = endDate.value;
+            const amountType = amountFilterType.value;
+            const amountValue = parseFloat(amountFilterValue.value);
+
             list.innerHTML = '';
-            const filteredTransactions = selectedCategory === 'all'
-                ? transactions
-                : transactions.filter(t => t.category === selectedCategory);
+
+            let filtered = transactions;
+
+            if (searchValue.trim() !== '') {
+                filtered = filtered.filter(t => t.text.toLowerCase().includes(searchValue));
+            }
+
+            if (selectedCategory !== 'all') {
+                filtered = filtered.filter(t => t.category === selectedCategory);
+            }
+
+            if (startDateValue) {
+                filtered = filtered.filter(t => t.date && new Date(t.date) >= new Date(startDateValue));
+            }
+            if (endDateValue) {
+                filtered = filtered.filter(t => t.date && new Date(t.date) <= new Date(endDateValue));
+            }
             
-            filteredTransactions.forEach(addTransactionDOM);
+            if (!isNaN(amountValue) && amountValue > 0) {
+                if (amountType === 'greater') {
+                    filtered = filtered.filter(t => Math.abs(t.amount) > amountValue);
+                } else if (amountType === 'less') {
+                    filtered = filtered.filter(t => Math.abs(t.amount) < amountValue);
+                }
+            }
+
+            filtered.forEach(addTransactionDOM);
         }
 
         function exportData() {
@@ -505,9 +700,20 @@
             filteredTransactions.forEach(t => addTransactionDOM(t, t.id === newTransactionId));
             updateValues();
             populateCategories();
+            updateDashboard();
+            updateKPIs();
             
-            const savedTheme = localStorage.getItem('theme') || 'light';
+            let savedTheme = localStorage.getItem('theme');
+            if (!savedTheme) {
+                if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                    savedTheme = 'dark';
+                } else {
+                    const hour = new Date().getHours();
+                    savedTheme = (hour < 6 || hour > 20) ? 'dark' : 'light';
+                }
+            }
             document.body.className = savedTheme;
+            localStorage.setItem('theme', savedTheme);
 
             document.getElementById('loader').style.display = 'none';
             document.querySelector('.container').style.display = 'block';
@@ -518,9 +724,132 @@
         form.addEventListener('submit', addTransaction);
         themeToggle.addEventListener('click', toggleTheme);
         filterCategory.addEventListener('change', filterTransactions);
+        searchText.addEventListener('input', filterTransactions);
+        startDate.addEventListener('change', filterTransactions);
+        endDate.addEventListener('change', filterTransactions);
+        amountFilterType.addEventListener('change', filterTransactions);
+        amountFilterValue.addEventListener('input', filterTransactions);
         exportBtn.addEventListener('click', exportData);
         importBtn.addEventListener('click', importData);
         importFile.addEventListener('change', handleImport);
+
+        let categoryChart;
+        let timelineChart;
+
+        function updateDashboard() {
+            if (categoryChart) {
+                categoryChart.destroy();
+            }
+            if (timelineChart) {
+                timelineChart.destroy();
+            }
+
+            // Pie Chart: Expenses by Category
+            const expenseByCategory = transactions
+                .filter(t => t.type === 'expense')
+                .reduce((acc, t) => {
+                    acc[t.category] = (acc[t.category] || 0) + Math.abs(t.amount);
+                    return acc;
+                }, {});
+
+            const pieCtx = document.getElementById('category-chart').getContext('2d');
+            categoryChart = new Chart(pieCtx, {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(expenseByCategory),
+                    datasets: [{
+                        label: 'Expenses by Category',
+                        data: Object.values(expenseByCategory),
+                        backgroundColor: [ '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40' ],
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        }
+                    }
+                }
+            });
+
+            // Bar Chart: Income vs Expense by Month
+            const monthlyData = transactions.reduce((acc, t) => {
+                if (!t.date) return acc;
+                const month = new Date(t.date).toLocaleString('default', { month: 'short', year: 'numeric' });
+                if (!acc[month]) {
+                    acc[month] = { income: 0, expense: 0 };
+                }
+                if (t.type === 'income') {
+                    acc[month].income += t.amount;
+                } else {
+                    acc[month].expense += Math.abs(t.amount);
+                }
+                return acc;
+            }, {});
+
+            const sortedMonths = Object.keys(monthlyData).sort((a, b) => new Date(a) - new Date(b));
+
+            const barCtx = document.getElementById('timeline-chart').getContext('2d');
+            timelineChart = new Chart(barCtx, {
+                type: 'bar',
+                data: {
+                    labels: sortedMonths,
+                    datasets: [{
+                        label: 'Income',
+                        data: sortedMonths.map(m => monthlyData[m].income),
+                        backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1
+                    }, {
+                        label: 'Expense',
+                        data: sortedMonths.map(m => monthlyData[m].expense),
+                        backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateKPIs() {
+            const kpiContainer = document.getElementById('kpi-container');
+            kpiContainer.innerHTML = ''; // Clear old badges
+
+            // KPI 1: Top Spending Category this month
+            const thisMonthExpenses = transactions.filter(t => {
+                if (!t.date || t.type !== 'expense') return false;
+                const transactionDate = new Date(t.date);
+                const now = new Date();
+                return transactionDate.getMonth() === now.getMonth() && transactionDate.getFullYear() === now.getFullYear();
+            });
+
+            if (thisMonthExpenses.length > 0) {
+                const expenseByCategory = thisMonthExpenses.reduce((acc, t) => {
+                    acc[t.category] = (acc[t.category] || 0) + Math.abs(t.amount);
+                    return acc;
+                }, {});
+
+                const topCategory = Object.keys(expenseByCategory).reduce((a, b) => expenseByCategory[a] > expenseByCategory[b] ? a : b);
+
+                const badge = document.createElement('div');
+                badge.classList.add('kpi-badge');
+                badge.innerHTML = `<span>Top spending this month: <strong>${topCategory}</strong></span>`;
+                kpiContainer.appendChild(badge);
+            } else {
+                 const badge = document.createElement('div');
+                badge.classList.add('kpi-badge');
+                badge.innerHTML = `<span>No expenses recorded this month.</span>`;
+                kpiContainer.appendChild(badge);
+            }
+        }
 
         let deferredPrompt;
         window.addEventListener('beforeinstallprompt', (e) => {
@@ -573,6 +902,123 @@
                     break;
             }
         });
+
+        const addTransactionSection = document.querySelector('.add-transaction');
+
+        addTransactionSection.addEventListener('focusin', () => {
+            document.body.classList.add('focus-mode-active');
+        });
+
+        addTransactionSection.addEventListener('focusout', () => {
+            setTimeout(() => {
+                if (!addTransactionSection.contains(document.activeElement)) {
+                    document.body.classList.remove('focus-mode-active');
+                }
+            }, 100);
+        });
+
+        // Mini Widget Logic
+        const widget = document.getElementById('mini-widget');
+        const minimizeBtn = document.getElementById('minimize-widget');
+        const widgetContent = document.querySelector('.widget-content');
+
+        minimizeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            widgetContent.style.display = widgetContent.style.display === 'none' ? 'block' : 'none';
+            minimizeBtn.textContent = widgetContent.style.display === 'none' ? '+' : '-';
+        });
+
+        let isDragging = false;
+        let offsetX, offsetY;
+
+        const startDrag = (e) => {
+            isDragging = true;
+            const clientX = e.clientX || e.touches[0].clientX;
+            const clientY = e.clientY || e.touches[0].clientY;
+            offsetX = clientX - widget.offsetLeft;
+            offsetY = clientY - widget.offsetTop;
+            widget.style.cursor = 'grabbing';
+        };
+
+        const drag = (e) => {
+            if (!isDragging) return;
+            const clientX = e.clientX || e.touches[0].clientX;
+            const clientY = e.clientY || e.touches[0].clientY;
+            e.preventDefault();
+            widget.style.left = `${clientX - offsetX}px`;
+            widget.style.top = `${clientY - offsetY}px`;
+        };
+
+        const stopDrag = () => {
+            isDragging = false;
+            widget.style.cursor = 'move';
+        };
+
+        widget.addEventListener('mousedown', startDrag);
+        document.addEventListener('mousemove', drag);
+        document.addEventListener('mouseup', stopDrag);
+
+        widget.addEventListener('touchstart', startDrag, { passive: true });
+        document.addEventListener('touchmove', drag, { passive: false });
+        document.addEventListener('touchend', stopDrag);
+
+        // Voice Input
+        const voiceBtn = document.getElementById('voice-btn');
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        if (SpeechRecognition) {
+            const recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+
+            voiceBtn.addEventListener('click', () => {
+                recognition.start();
+            });
+
+            recognition.onstart = () => {
+                voiceBtn.textContent = 'Listening...';
+                voiceBtn.disabled = true;
+            };
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                parseVoiceCommand(transcript);
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error', event.error);
+                alert('Error in speech recognition. Please try again.');
+            };
+
+            recognition.onend = () => {
+                voiceBtn.innerHTML = '🎤';
+                voiceBtn.disabled = false;
+            };
+
+            function parseVoiceCommand(transcript) {
+                let description = transcript;
+
+                if (transcript.toLowerCase().includes('income') || transcript.toLowerCase().includes('received')) {
+                    document.getElementById('income').checked = true;
+                } else {
+                    document.getElementById('expense').checked = true;
+                }
+
+                const numbers = transcript.match(/(\d+(\.\d+)?)/);
+                if (numbers) {
+                    amount.value = numbers[0];
+                    description = description.replace(numbers[0], '').trim();
+                }
+
+                description = description.replace(/income|expense|received|buy|for|at|dollars|euros|pounds/ig, '').trim();
+                text.value = description.charAt(0).toUpperCase() + description.slice(1);
+            }
+
+        } else {
+            voiceBtn.style.display = 'none';
+        }
     </script>
 </body>
 </html>
